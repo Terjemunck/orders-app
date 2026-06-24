@@ -37,6 +37,9 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
   function renderPage({ milestone, items, responses, docs, visibleCos, contacts, requiredDocs, extraItems }) {
     if (!milestone) { container.innerHTML = '<div class="p-6 text-sm text-gray-500">Milestone not found.</div>'; return }
 
+    const requiredDocIds = new Set(requiredDocs.filter(rd => rd.document_id).map(rd => rd.document_id))
+    const additionalDocs = docs.filter(d => !requiredDocIds.has(d.id))
+
     const productName = milestone.order?.product?.name ?? ''
     const customerName = milestone.order?.customer?.name ?? ''
     const allTemplateYes = items.every(item => responses.find(r => r.item_id === item.id)?.answer === true)
@@ -48,13 +51,6 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
     const allRequiredDocsUploaded = requiredDocs.every(rd => rd.document_id != null)
     const canComplete = canEdit && !milestone.completed && (totalItems === 0 || allYes) && allRequiredDocsUploaded
 
-    const docsHtml = docs.map(d => `<div class="flex items-center gap-1 rounded border px-3 py-2 text-xs hover:bg-gray-50">
-      <button class="open-doc flex items-center gap-2 flex-1 text-left min-w-0" data-path="${d.file_path}" data-id="${d.id}">
-        ${icons.file}<span class="flex-1 truncate">${d.filename}</span>
-        <span class="text-gray-400 shrink-0">${new Date(d.uploaded_at).toLocaleDateString()}</span>
-      </button>
-      ${isMgr ? `<button class="del-doc-btn shrink-0 p-1 text-gray-300 hover:text-red-500 rounded ml-1" data-id="${d.id}" data-path="${d.file_path}">${icons.trash}</button>` : ''}
-    </div>`).join('')
 
     const canUpload = canEdit && !milestone.completed
 
@@ -91,6 +87,8 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
       ? `<button class="edit-date-btn text-xs text-blue-600 hover:text-blue-800 underline ml-1">${milestone.target_date ? 'edit' : 'set'}</button>`
       : ''
 
+    const historyBtn = `<button class="date-history-btn text-xs text-gray-400 hover:text-gray-600 underline ml-2">history</button>`
+
     container.innerHTML = `<div class="p-4 page-enter">
 
       <!-- Header -->
@@ -107,7 +105,7 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
       <div class="flex items-center gap-6 mb-4 ml-7 text-sm">
         <span class="text-gray-400">Start <span class="text-gray-700 font-medium ml-1">${milestone.start_date ?? '—'}</span></span>
         <span class="text-gray-300">|</span>
-        <span class="text-gray-400">Target <span class="text-gray-700 font-medium ml-1">${milestone.target_date ?? '—'}</span>${editTargetBtn}</span>
+        <span class="text-gray-400">Target <span class="text-gray-700 font-medium ml-1">${milestone.target_date ?? '—'}</span>${editTargetBtn}${historyBtn}</span>
         <span class="text-gray-300">|</span>
         <span class="text-gray-400">Finished <span class="${milestone.actual_date ? 'text-green-700' : 'text-gray-700'} font-medium ml-1">${milestone.actual_date ?? '—'}</span></span>
       </div>
@@ -169,17 +167,35 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
               ${requiredDocs.map(rd => {
                 const label = rd.document_type?.name ?? rd.custom_name ?? 'Document'
                 const uploaded = !!rd.document_id
-                return `<div class="flex items-center gap-3 px-4 py-2 transition-colors ${uploaded ? 'bg-green-50' : ''} ${!uploaded && canUpload ? 'req-doc-row' : ''}" ${!uploaded && canUpload ? `data-rd-id="${rd.id}"` : ''}>
-                  <span class="shrink-0 ${uploaded ? 'text-green-600' : 'text-gray-300'}">${uploaded ? icons.check : icons.circle}</span>
+                if (uploaded) {
+                  return `<div class="flex items-center gap-3 px-4 py-2 bg-green-50">
+                    <span class="shrink-0 text-green-600">${icons.check}</span>
+                    <span class="text-sm flex-1">${label}</span>
+                    <div class="flex items-center gap-1 shrink-0">
+                      <button class="open-req-doc text-xs text-blue-600 hover:underline" data-path="${rd.document?.file_path}">${rd.document?.filename ?? 'View'}</button>
+                      ${isMgr ? `<button class="del-req-doc-btn p-1 text-gray-300 hover:text-red-500 rounded" data-rd-id="${rd.id}" data-doc-id="${rd.document_id}" data-path="${rd.document?.file_path}">${icons.trash}</button>` : ''}
+                    </div>
+                  </div>`
+                }
+                if (canUpload) {
+                  return `<div class="px-4 py-3 req-doc-row" data-rd-id="${rd.id}">
+                    <div class="flex items-center gap-2 mb-2">
+                      <span class="text-gray-300 shrink-0">${icons.circle}</span>
+                      <span class="text-sm">${label}</span>
+                    </div>
+                    <label class="cursor-pointer block">
+                      <input type="file" class="hidden req-doc-upload" data-rd-id="${rd.id}" />
+                      <span class="req-doc-upload-span flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-gray-200 px-4 py-4 hover:border-blue-300 hover:bg-blue-50/40 transition-colors">
+                        <span class="text-gray-300">${icons.upload}</span>
+                        <span class="text-xs text-gray-400">Drop file here or <span class="text-blue-600">click to browse</span></span>
+                      </span>
+                    </label>
+                  </div>`
+                }
+                return `<div class="flex items-center gap-3 px-4 py-2">
+                  <span class="shrink-0 text-gray-300">${icons.circle}</span>
                   <span class="text-sm flex-1">${label}</span>
-                  ${uploaded
-                    ? `<div class="flex items-center gap-1 shrink-0">
-                        <button class="open-req-doc text-xs text-blue-600 hover:underline" data-path="${rd.document?.file_path}">${rd.document?.filename ?? 'View'}</button>
-                        ${isMgr ? `<button class="del-req-doc-btn p-1 text-gray-300 hover:text-red-500 rounded" data-rd-id="${rd.id}" data-doc-id="${rd.document_id}" data-path="${rd.document?.file_path}">${icons.trash}</button>` : ''}
-                       </div>`
-                    : (canUpload
-                        ? `<label class="cursor-pointer shrink-0"><input type="file" class="hidden req-doc-upload" data-rd-id="${rd.id}" /><span class="req-doc-upload-span inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-dashed border-gray-300 bg-white hover:border-blue-400 hover:bg-blue-50 cursor-pointer transition-colors">${icons.upload} Upload</span></label>`
-                        : '<span class="text-xs text-gray-400 shrink-0">Missing</span>')}
+                  <span class="text-xs text-gray-400 shrink-0">Missing</span>
                 </div>`
               }).join('')}
             </div>
@@ -202,14 +218,20 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
               <span class="text-sm font-semibold">${requiredDocs.length > 0 ? 'Additional Documents' : 'Documents'}</span>
             </div>
             <div class="p-4 space-y-3">
-              ${docs.length > 0 ? `<div class="space-y-1.5">${docsHtml}</div>` : ''}
+              ${additionalDocs.length > 0 ? `<div class="space-y-1.5">${additionalDocs.map(d => `<div class="flex items-center gap-1 rounded border px-3 py-2 text-xs hover:bg-gray-50">
+      <button class="open-doc flex items-center gap-2 flex-1 text-left min-w-0" data-path="${d.file_path}" data-id="${d.id}">
+        ${icons.file}<span class="flex-1 truncate">${d.filename}</span>
+        <span class="text-gray-400 shrink-0">${new Date(d.uploaded_at).toLocaleDateString()}</span>
+      </button>
+      ${isMgr ? `<button class="del-doc-btn shrink-0 p-1 text-gray-300 hover:text-red-500 rounded ml-1" data-id="${d.id}" data-path="${d.file_path}">${icons.trash}</button>` : ''}
+    </div>`).join('')}</div>` : ''}
               ${canUpload
                 ? `<label id="doc-drop-zone" class="flex flex-col items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-gray-200 px-4 py-5 cursor-pointer hover:border-blue-300 hover:bg-blue-50/40 transition-colors">
                     <input type="file" class="hidden doc-upload" multiple />
                     <span class="text-gray-300">${icons.upload}</span>
                     <span class="text-xs text-gray-400">Drop files here or <span class="text-blue-600">click to browse</span></span>
                   </label>`
-                : (docs.length === 0 ? '<p class="text-xs text-gray-400">No documents uploaded.</p>' : '')}
+                : (additionalDocs.length === 0 ? '<p class="text-xs text-gray-400">No documents uploaded.</p>' : '')}
             </div>
           </div>
 
@@ -390,6 +412,7 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
     })
 
     container.querySelector('.edit-date-btn')?.addEventListener('click', () => openEditDate(milestone.target_date))
+    container.querySelector('.date-history-btn')?.addEventListener('click', () => openDateHistory())
 
     async function saveSeqRule(field, value) {
       const errEl = container.querySelector('#seq-rule-error')
@@ -500,11 +523,11 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
     container.querySelectorAll('.req-doc-row').forEach(row => {
       const rdId = row.dataset.rdId
       const span = row.querySelector('.req-doc-upload-span')
-      row.addEventListener('dragover', e => { e.preventDefault(); row.classList.add('bg-blue-50'); span?.classList.add('border-blue-400') })
-      row.addEventListener('dragleave', e => { if (!row.contains(e.relatedTarget)) { row.classList.remove('bg-blue-50'); span?.classList.remove('border-blue-400') } })
+      row.addEventListener('dragover', e => { e.preventDefault(); span?.classList.add('border-blue-300', 'bg-blue-50/40') })
+      row.addEventListener('dragleave', e => { if (!row.contains(e.relatedTarget)) span?.classList.remove('border-blue-300', 'bg-blue-50/40') })
       row.addEventListener('drop', async e => {
         e.preventDefault()
-        row.classList.remove('bg-blue-50'); span?.classList.remove('border-blue-400')
+        span?.classList.remove('border-blue-300', 'bg-blue-50/40')
         const file = e.dataTransfer?.files?.[0]; if (!file) return
         const ok = await doUploadReqDoc(file, rdId, span)
         if (ok) renderPage(await load())
@@ -620,12 +643,17 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
   }
 
   async function openEditDate(currentDate) {
-    const dlg = showModal({ id: 'date-modal', title: 'Target Date', body: `
+    const isChange = !!currentDate
+    const dlg = showModal({ id: 'date-modal', title: isChange ? 'Change Target Date' : 'Set Target Date', body: `
       <div class="space-y-4">
         <div class="space-y-1.5">
           <label class="text-sm font-medium text-gray-700">Target date</label>
           <input type="date" id="target-date-input" value="${currentDate ?? ''}" class="${inputCls()}" />
         </div>
+        ${isChange ? `<div class="space-y-1.5">
+          <label class="text-sm font-medium text-gray-700">Reason for change <span class="text-red-500">*</span></label>
+          <textarea id="date-reason-input" rows="3" placeholder="Why is the target date being moved?" class="${inputCls('resize-none')}"></textarea>
+        </div>` : ''}
         <p id="date-error" class="hidden text-sm text-red-600"></p>
         <div class="flex justify-end gap-2">
           ${btn('Cancel', { variant: 'outline', cls: 'cancel-date' })}
@@ -636,13 +664,63 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
     dlg.querySelector('.cancel-date').onclick = () => closeModal('date-modal')
     dlg.querySelector('.save-date').onclick = async () => {
       const newDate = dlg.querySelector('#target-date-input').value
+      const reason = dlg.querySelector('#date-reason-input')?.value?.trim() ?? ''
       const errEl = dlg.querySelector('#date-error')
+
+      if (isChange && !reason) {
+        errEl.textContent = 'Please enter a reason for the date change.'
+        errEl.classList.remove('hidden')
+        return
+      }
+
       const saveBtn = dlg.querySelector('.save-date'); saveBtn.disabled = true; saveBtn.textContent = 'Saving…'
       const { error } = await db.from('milestones').update({ target_date: newDate || null }).eq('id', milestoneId)
       if (error) { errEl.textContent = error.message; errEl.classList.remove('hidden'); saveBtn.disabled = false; saveBtn.textContent = 'Save'; return }
+
+      // Write to change log
+      const { error: logErr } = await db.from('milestone_date_change_log').insert({
+        milestone_id: milestoneId,
+        old_date: isChange ? currentDate : null,
+        new_date: newDate || null,
+        reason: reason || 'Initial date set',
+        changed_by: auth.profile?.id ?? null,
+      })
+      if (logErr) console.warn('Date log insert failed:', logErr.message)
+
       closeModal('date-modal')
       renderPage(await load())
     }
+  }
+
+  async function openDateHistory() {
+    const { data: log } = await db.from('milestone_date_change_log')
+      .select('*, changed_by_user:users(name)')
+      .eq('milestone_id', milestoneId)
+      .order('changed_at', { ascending: false })
+
+    const rows = (log ?? []).map(entry => {
+      const from = entry.old_date ?? '—'
+      const to = entry.new_date ?? '—'
+      const who = entry.changed_by_user?.name ?? 'Unknown'
+      const when = new Date(entry.changed_at).toLocaleDateString()
+      return `<div class="py-3 border-b last:border-0">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs font-medium text-gray-700">${from} → ${to}</span>
+          <span class="text-xs text-gray-400">${when} · ${who}</span>
+        </div>
+        <p class="text-sm text-gray-600">${entry.reason}</p>
+      </div>`
+    }).join('')
+
+    showModal({ id: 'date-history-modal', title: 'Target Date History', body: `
+      <div class="space-y-0 max-h-96 overflow-y-auto">
+        ${rows || '<p class="text-sm text-gray-400 py-2">No changes recorded yet.</p>'}
+      </div>
+      <div class="flex justify-end pt-3">
+        ${btn('Close', { variant: 'outline', cls: 'close-date-history' })}
+      </div>` })
+
+    document.querySelector('.close-date-history')?.addEventListener('click', () => closeModal('date-history-modal'))
   }
 
   renderPage(await load())
