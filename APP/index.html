@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Katicom Orders</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            border: '#e5e7eb',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    dialog::backdrop { background: rgba(0,0,0,0.5); }
+    dialog { border: none; border-radius: 0.75rem; box-shadow: 0 20px 60px rgba(0,0,0,0.15); padding: 0; max-width: 90vw; }
+    dialog[open] { display: flex; flex-direction: column; }
+    .page-enter { animation: fadeIn 0.1s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900 antialiased">
+
+  <div id="loading-screen" class="fixed inset-0 flex items-center justify-center bg-gray-50 z-50">
+    <p class="text-sm text-gray-400">Loading…</p>
+  </div>
+
+  <div id="app" class="hidden flex h-screen overflow-hidden">
+    <!-- Sidebar -->
+    <aside class="flex w-56 shrink-0 flex-col border-r bg-white">
+      <div class="flex h-14 items-center border-b px-4">
+        <span class="text-base font-semibold">Katicom Orders</span>
+      </div>
+      <nav id="sidebar-nav" class="flex-1 overflow-y-auto p-2 space-y-0.5"></nav>
+      <div class="border-t p-3">
+        <div class="mb-2 px-2">
+          <p id="user-name" class="text-xs font-medium text-gray-900 truncate"></p>
+          <p id="user-company" class="text-xs text-gray-500 truncate"></p>
+        </div>
+        <button id="signout-btn" class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-100">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+          Sign out
+        </button>
+      </div>
+    </aside>
+    <!-- Main content -->
+    <main id="content" class="flex-1 overflow-y-auto"></main>
+  </div>
+
+  <div id="login-screen" class="hidden min-h-screen flex items-center justify-center bg-gray-50">
+    <div class="w-full max-w-sm rounded-xl border bg-white p-8 shadow-sm">
+      <div class="mb-6 text-center">
+        <h1 class="text-2xl font-semibold text-gray-900">Katicom Orders</h1>
+        <p class="mt-1 text-sm text-gray-500">Sign in to your account</p>
+      </div>
+      <form id="login-form" class="space-y-4">
+        <div class="space-y-1.5">
+          <label class="text-sm font-medium text-gray-700" for="login-email">Email</label>
+          <input id="login-email" type="email" autocomplete="email" required
+            class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
+        </div>
+        <div class="space-y-1.5">
+          <label class="text-sm font-medium text-gray-700" for="login-password">Password</label>
+          <input id="login-password" type="password" autocomplete="current-password" required
+            class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
+        </div>
+        <p id="login-error" class="hidden text-sm text-red-600"></p>
+        <button type="submit" id="login-btn"
+          class="w-full rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50">
+          Sign in
+        </button>
+        <button type="button" id="forgot-btn" class="w-full text-center text-xs text-gray-500 hover:text-gray-800 mt-1">
+          Forgot password?
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Password reset screen (shown after clicking email link) -->
+  <div id="reset-screen" class="hidden min-h-screen flex items-center justify-center bg-gray-50">
+    <div class="w-full max-w-sm rounded-xl border bg-white p-8 shadow-sm">
+      <div class="mb-6 text-center">
+        <h1 class="text-2xl font-semibold text-gray-900">Set new password</h1>
+        <p class="mt-1 text-sm text-gray-500">Choose a new password for your account</p>
+      </div>
+      <form id="reset-form" class="space-y-4">
+        <div class="space-y-1.5">
+          <label class="text-sm font-medium text-gray-700" for="reset-password">New password</label>
+          <input id="reset-password" type="password" autocomplete="new-password" required minlength="6"
+            class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
+        </div>
+        <div class="space-y-1.5">
+          <label class="text-sm font-medium text-gray-700" for="reset-password-confirm">Confirm password</label>
+          <input id="reset-password-confirm" type="password" autocomplete="new-password" required minlength="6"
+            class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
+        </div>
+        <p id="reset-error" class="hidden text-sm text-red-600"></p>
+        <p id="reset-success" class="hidden text-sm text-green-600"></p>
+        <button type="submit" id="reset-btn"
+          class="w-full rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50">
+          Set password
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/pages/orders.js"></script>
+  <script src="js/pages/order-detail.js"></script>
+  <script src="js/pages/milestone-detail.js"></script>
+  <script src="js/pages/companies.js"></script>
+  <script src="js/pages/users.js"></script>
+  <script src="js/pages/products.js"></script>
+<script src="js/pages/notifications.js"></script>
+  <script src="js/pages/settings.js"></script>
+  <script src="js/router.js"></script>
+</body>
+</html>
