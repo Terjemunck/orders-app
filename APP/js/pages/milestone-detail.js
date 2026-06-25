@@ -546,7 +546,7 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
   }
 
   async function openManageContacts(currentContacts) {
-    const { data: allUsers } = await db.from('users').select('id, name, email').order('name')
+    const { data: allUsers } = await db.from('users').select('id, name, email, company_id').order('name')
     const byRole = { milestone_owner: new Set(), checksheet_owner: new Set() }
     for (const c of currentContacts) byRole[c.role]?.add(c.user_id)
 
@@ -593,6 +593,16 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
       if (rows.length) {
         const { error: insErr } = await db.from('milestone_contacts').insert(rows)
         if (insErr) { errEl.textContent = insErr.message; errEl.classList.remove('hidden'); saveBtn.disabled = false; saveBtn.textContent = 'Save'; return }
+
+        // Auto-add each contact's company to milestone_visible_companies
+        const contactUsers = (allUsers ?? []).filter(u => rows.some(r => r.user_id === u.id))
+        const companyIds = [...new Set(contactUsers.map(u => u.company_id).filter(Boolean))]
+        if (companyIds.length) {
+          await db.from('milestone_visible_companies').upsert(
+            companyIds.map(cid => ({ milestone_id: milestoneId, company_id: cid })),
+            { ignoreDuplicates: true }
+          )
+        }
       }
 
       closeModal('contacts-modal')
@@ -628,6 +638,25 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
       const saveBtn = dlg.querySelector('.save-vis')
       saveBtn.disabled = true; saveBtn.textContent = 'Saving…'
       const selected = [...dlg.querySelectorAll('.visibility-chk:checked')].map(el => el.value)
+
+      // If companies are being removed, check if any of their users are milestone contacts
+      const removedIds = [...currentIds].filter(id => !selected.includes(id))
+      if (removedIds.length) {
+        const { data: allContacts } = await db.from('milestone_contacts')
+          .select('user_id, role, user:users(id, name, company_id)')
+          .eq('milestone_id', milestoneId)
+        const affected = (allContacts ?? []).filter(c => removedIds.includes(c.user?.company_id))
+        if (affected.length) {
+          const names = affected.map(c => c.user?.name ?? 'Unknown').join(', ')
+          if (!confirm(`Removing this company will also remove the following contacts from this milestone:\n\n${names}\n\nContinue?`)) {
+            saveBtn.disabled = false; saveBtn.textContent = 'Save'
+            return
+          }
+          await db.from('milestone_contacts').delete()
+            .eq('milestone_id', milestoneId)
+            .in('user_id', affected.map(c => c.user_id))
+        }
+      }
 
       const { error: delErr } = await db.from('milestone_visible_companies').delete().eq('milestone_id', milestoneId)
       if (delErr) { dlg.querySelector('#vis-error').textContent = delErr.message; dlg.querySelector('#vis-error').classList.remove('hidden'); saveBtn.disabled = false; saveBtn.textContent = 'Save'; return }
