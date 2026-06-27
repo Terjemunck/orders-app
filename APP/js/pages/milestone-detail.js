@@ -39,7 +39,16 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
       responsePhotos = photosData ?? []
     }
 
-    return { milestone: ms, items, responses: responses ?? [], docs: docs ?? [], visibleCos: visibleCos ?? [], contacts: contacts ?? [], requiredDocs: requiredDocs ?? [], extraItems: extraItems ?? [], responsePhotos }
+    let templateItemPhotos = {}
+    if (items.length) {
+      const { data: tplPhotos } = await db.from('milestone_template_item_photos')
+        .select('item_id').in('item_id', items.map(i => i.id))
+      for (const p of tplPhotos ?? []) {
+        templateItemPhotos[p.item_id] = (templateItemPhotos[p.item_id] ?? 0) + 1
+      }
+    }
+
+    return { milestone: ms, items, responses: responses ?? [], docs: docs ?? [], visibleCos: visibleCos ?? [], contacts: contacts ?? [], requiredDocs: requiredDocs ?? [], extraItems: extraItems ?? [], responsePhotos, templateItemPhotos }
   }
 
   function sanitizeFilename(name) {
@@ -51,7 +60,7 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
       .replace(/^_|_$/g, '')
   }
 
-  function renderPage({ milestone, items, responses, docs, visibleCos, contacts, requiredDocs, extraItems, responsePhotos }) {
+  function renderPage({ milestone, items, responses, docs, visibleCos, contacts, requiredDocs, extraItems, responsePhotos, templateItemPhotos }) {
     if (!milestone) { container.innerHTML = '<div class="p-6 text-sm text-gray-500">Milestone not found.</div>'; return }
 
     const requiredDocIds = new Set(requiredDocs.filter(rd => rd.document_id).map(rd => rd.document_id))
@@ -149,12 +158,19 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
                       data-resp-id="${resp.id}" data-label="${item.question.replace(/"/g, '&quot;')}"
                       title="${photoCount > 0 ? photoCount + ' photo(s)' : 'Add photo'}">${icons.camera}${photoCount > 0 ? `<span class="text-xs font-medium">${photoCount}</span>` : ''}</button>`
                   : ''
+                const refCount = templateItemPhotos[item.id] ?? 0
+                const refBtn = refCount > 0
+                  ? `<button class="ref-photo-btn shrink-0 flex items-center gap-1 px-1.5 py-1 rounded text-amber-500 hover:text-amber-700"
+                      data-item-id="${item.id}" data-label="${item.question.replace(/"/g, '&quot;')}"
+                      title="${refCount} reference photo(s)">${icons.camera}<span class="text-xs font-medium">${refCount}</span></button>`
+                  : ''
                 return `<div class="flex items-center gap-3 px-4 py-2.5 ${checked ? 'bg-green-50' : ''}">
                   <button type="button" class="toggle-item shrink-0 ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}"
                     data-item-id="${item.id}" data-resp-id="${resp?.id ?? ''}" data-checked="${checked}" ${disabled ? 'disabled' : ''}>
                     ${checked ? `<span class="text-green-600">${icons.check}</span>` : `<span class="text-gray-300">${icons.circle}</span>`}
                   </button>
                   <p class="text-sm flex-1">${item.question}</p>
+                  ${refBtn}
                   ${resp?.answered_at ? `<span class="text-xs text-gray-300 shrink-0">${new Date(resp.answered_at).toLocaleDateString()}</span>` : ''}
                   ${photoBtn}
                 </div>`
@@ -431,6 +447,10 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
 
     container.querySelectorAll('.cs-photo-btn').forEach(b => {
       b.addEventListener('click', () => openPhotoModal(b.dataset.label, b.dataset.respId, canUpload))
+    })
+
+    container.querySelectorAll('.ref-photo-btn').forEach(b => {
+      b.addEventListener('click', () => openRefPhotoModal(b.dataset.label, b.dataset.itemId))
     })
 
     container.querySelector('#reopen-ms-btn')?.addEventListener('click', async () => {
@@ -776,6 +796,36 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
       </div>` })
 
     document.querySelector('.close-date-history')?.addEventListener('click', () => closeModal('date-history-modal'))
+  }
+
+  async function openRefPhotoModal(label, itemId) {
+    const { data: photos } = await db.from('milestone_template_item_photos')
+      .select('*').eq('item_id', itemId).order('uploaded_at')
+
+    const signedPhotos = await Promise.all((photos ?? []).map(async p => {
+      const { data } = await db.storage.from('Documents').createSignedUrl(p.file_path, 3600)
+      return { ...p, signedUrl: data?.signedUrl }
+    }))
+
+    const thumbsHtml = signedPhotos.map(p => `
+      <div>
+        <a href="${p.signedUrl}" target="_blank" class="block">
+          <img src="${p.signedUrl}" alt="${p.filename}"
+            class="w-full h-28 object-cover rounded-lg border border-gray-200 hover:border-amber-300 transition-colors" />
+        </a>
+        <p class="text-xs text-gray-400 truncate mt-1">${p.filename}</p>
+      </div>`).join('')
+
+    const dlg = showModal({ id: 'ref-photo-modal', title: `Reference photos — ${label}`, size: 'lg', body: `
+      <div>
+        <p class="text-xs text-amber-600 mb-3">These are reference photos set by the system manager to guide this check.</p>
+        <div class="grid grid-cols-3 gap-3 mb-4">${thumbsHtml}</div>
+        <div class="flex justify-end">
+          ${btn('Close', { variant: 'outline', cls: 'close-ref-photo' })}
+        </div>
+      </div>` })
+
+    dlg.querySelector('.close-ref-photo')?.addEventListener('click', () => closeModal('ref-photo-modal'))
   }
 
   async function openPhotoModal(label, respId, canUploadPhotos) {

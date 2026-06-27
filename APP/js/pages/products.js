@@ -124,7 +124,7 @@ window.render_products = async function(container) {
   async function openTemplateForm(template, productId, factoryOpts, allCos, onSave, parentDlg, defaultSortOrder = 0) {
     const isEdit = !!template
     const items = (template?.milestone_template_items ?? []).sort((a, b) => a.sort_order - b.sort_order)
-    let itemList = items.map(i => ({ id: i.id, question: i.question, sort_order: i.sort_order }))
+    let itemList = items.map(i => ({ id: i.id, question: i.question, sort_order: i.sort_order, photoCount: itemPhotoMap[i.id] ?? 0 }))
 
     // Fetch existing visible companies + users + template contacts + required docs
     let visibleIds = new Set()
@@ -161,9 +161,23 @@ window.render_products = async function(container) {
       }
     }
 
+    // Fetch photo counts per template item
+    let itemPhotoMap = {}
+    if (isEdit && items.length) {
+      const { data: photoRows } = await db.from('milestone_template_item_photos')
+        .select('item_id').in('item_id', items.map(i => i.id))
+      for (const p of photoRows ?? []) {
+        itemPhotoMap[p.item_id] = (itemPhotoMap[p.item_id] ?? 0) + 1
+      }
+    }
+
     function itemsHtml() {
       return itemList.map((it, idx) => `<div class="flex items-center gap-1.5 item-row" data-idx="${idx}">
         <input type="text" class="item-question flex-1 rounded border border-gray-300 px-2 py-1 text-xs" placeholder="Checksheet question…" value="${it.question}" />
+        ${it.id ? `<button type="button" class="item-photo-btn shrink-0 flex items-center gap-0.5 p-0.5 rounded ${it.photoCount > 0 ? 'text-blue-500 hover:text-blue-700' : 'text-gray-300 hover:text-gray-500'}"
+          data-item-id="${it.id}" data-label="${(it.question || 'Item').replace(/"/g, '&quot;')}" title="${it.photoCount > 0 ? it.photoCount + ' photo(s)' : 'Add reference photos'}">
+          ${icons.camera.replace('h-4 w-4','h-3.5 w-3.5')}${it.photoCount > 0 ? `<span class="text-xs">${it.photoCount}</span>` : ''}
+        </button>` : `<span class="shrink-0 w-6"></span>`}
         <button type="button" class="remove-item shrink-0 p-0.5 text-gray-300 hover:text-red-500" data-idx="${idx}">${icons.x.replace('h-4 w-4','h-3 w-3')}</button>
       </div>`).join('')
     }
@@ -304,6 +318,92 @@ window.render_products = async function(container) {
 
     dlg2.querySelector('.cancel-tpl-form').onclick = () => closeModal('tpl-form-modal')
 
+    async function openItemPhotoModal(label, itemId, triggerBtn) {
+      function sanitizeFilename(name) {
+        return name.replace(/[–—]/g, '-').replace(/[^\w\s.\-_()]/g, '').replace(/\s+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')
+      }
+
+      const { data: photos } = await db.from('milestone_template_item_photos')
+        .select('*').eq('item_id', itemId).order('uploaded_at')
+
+      const signedPhotos = await Promise.all((photos ?? []).map(async p => {
+        const { data } = await db.storage.from('Documents').createSignedUrl(p.file_path, 3600)
+        return { ...p, signedUrl: data?.signedUrl }
+      }))
+
+      const thumbsHtml = signedPhotos.map(p => `
+        <div class="relative group">
+          <a href="${p.signedUrl}" target="_blank" class="block">
+            <img src="${p.signedUrl}" alt="${p.filename}"
+              class="w-full h-28 object-cover rounded-lg border border-gray-200 hover:border-blue-300 transition-colors" />
+          </a>
+          <button class="del-tpl-photo absolute top-1 right-1 bg-white/90 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+            data-photo-id="${p.id}" data-path="${p.file_path}">${icons.trash}</button>
+          <p class="text-xs text-gray-400 truncate mt-1">${p.filename}</p>
+        </div>`).join('')
+
+      const photoDlg = showModal({ id: 'tpl-photo-modal', title: `Reference photos — ${label}`, size: 'lg', body: `
+        <div>
+          ${signedPhotos.length > 0
+            ? `<div class="grid grid-cols-3 gap-3 mb-4">${thumbsHtml}</div>`
+            : `<p class="text-sm text-gray-400 text-center py-6 mb-2">No photos yet.</p>`}
+          <label class="flex flex-col items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-gray-200 px-4 py-5 cursor-pointer hover:border-blue-300 hover:bg-blue-50/40 transition-colors">
+            <input type="file" class="hidden tpl-photo-input" multiple accept="image/*" />
+            <span class="text-gray-300">${icons.upload}</span>
+            <span class="text-xs text-gray-400">Add photos — <span class="text-blue-600">click to browse</span></span>
+          </label>
+          <p id="tpl-photo-error" class="hidden text-sm text-red-600 mt-2"></p>
+          <div class="flex justify-end pt-3">
+            ${btn('Close', { variant: 'outline', cls: 'close-tpl-photo' })}
+          </div>
+        </div>` })
+
+      photoDlg.querySelector('.close-tpl-photo')?.addEventListener('click', () => closeModal('tpl-photo-modal'))
+
+      async function refreshBadge() {
+        const { data: fresh } = await db.from('milestone_template_item_photos').select('id').eq('item_id', itemId)
+        const count = fresh?.length ?? 0
+        // Update badge on the button in the form
+        const entry = itemList.find(i => i.id === itemId)
+        if (entry) entry.photoCount = count
+        if (triggerBtn) {
+          triggerBtn.className = triggerBtn.className.replace(/text-(?:blue-500 hover:text-blue-700|gray-300 hover:text-gray-500)/, count > 0 ? 'text-blue-500 hover:text-blue-700' : 'text-gray-300 hover:text-gray-500')
+          triggerBtn.innerHTML = `${icons.camera.replace('h-4 w-4','h-3.5 w-3.5')}${count > 0 ? `<span class="text-xs">${count}</span>` : ''}`
+        }
+      }
+
+      photoDlg.querySelector('.tpl-photo-input')?.addEventListener('change', async function() {
+        const files = [...(this.files ?? [])]; if (!files.length) return
+        const errEl = photoDlg.querySelector('#tpl-photo-error')
+        errEl?.classList.add('hidden'); this.disabled = true
+        for (const file of files) {
+          const safeName = sanitizeFilename(file.name)
+          const filePath = `template-item-photos/${itemId}/${Date.now()}_${safeName}`
+          const { error: uploadErr } = await db.storage.from('Documents').upload(filePath, file)
+          if (uploadErr) { if (errEl) { errEl.textContent = uploadErr.message; errEl.classList.remove('hidden') } this.disabled = false; return }
+          const { error: insErr } = await db.from('milestone_template_item_photos').insert({
+            item_id: itemId, file_path: filePath, filename: file.name, uploaded_by: auth.profile?.id ?? null,
+          })
+          if (insErr) { if (errEl) { errEl.textContent = insErr.message; errEl.classList.remove('hidden') } this.disabled = false; return }
+        }
+        closeModal('tpl-photo-modal')
+        await refreshBadge()
+        await openItemPhotoModal(label, itemId, triggerBtn)
+      })
+
+      photoDlg.querySelectorAll('.del-tpl-photo').forEach(b => {
+        b.addEventListener('click', async () => {
+          if (!confirm('Delete this photo?')) return
+          b.disabled = true
+          await db.storage.from('Documents').remove([b.dataset.path])
+          await db.from('milestone_template_item_photos').delete().eq('id', b.dataset.photoId)
+          closeModal('tpl-photo-modal')
+          await refreshBadge()
+          await openItemPhotoModal(label, itemId, triggerBtn)
+        })
+      })
+    }
+
     // Required docs — custom add buttons
     renderCustomDocs(dlg2)
     dlg2.querySelector('#add-custom-doc-to-lib').onclick = async () => {
@@ -346,6 +446,9 @@ window.render_products = async function(container) {
       dlg2.querySelectorAll('.item-question').forEach((inp, i) => {
         inp.oninput = () => { itemList[i].question = inp.value }
       })
+      dlg2.querySelectorAll('.item-photo-btn').forEach(b => {
+        b.onclick = () => openItemPhotoModal(b.dataset.label || 'Item', b.dataset.itemId, b)
+      })
     }
     function refreshItems() {
       const c = dlg2.querySelector('#items-container')
@@ -385,11 +488,17 @@ window.render_products = async function(container) {
         tplId = data.id
       }
 
-      // Sync checksheet items: delete all + re-insert
-      await db.from('milestone_template_items').delete().eq('template_id', tplId)
+      // Sync checksheet items: preserve IDs so linked photos survive
       const validItems = itemList.filter(i => i.question.trim())
-      if (validItems.length) {
-        await db.from('milestone_template_items').insert(validItems.map((i, idx) => ({ template_id: tplId, question: i.question.trim(), sort_order: idx })))
+      const keptIds = new Set(validItems.filter(i => i.id).map(i => i.id))
+      const toDeleteIds = items.filter(i => !keptIds.has(i.id)).map(i => i.id)
+      if (toDeleteIds.length) await db.from('milestone_template_items').delete().in('id', toDeleteIds)
+      for (const [idx, item] of validItems.entries()) {
+        if (item.id) {
+          await db.from('milestone_template_items').update({ question: item.question.trim(), sort_order: idx }).eq('id', item.id)
+        } else {
+          await db.from('milestone_template_items').insert({ template_id: tplId, question: item.question.trim(), sort_order: idx })
+        }
       }
 
       // Sync visible companies: delete all + re-insert
