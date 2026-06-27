@@ -124,7 +124,8 @@ window.render_products = async function(container) {
   async function openTemplateForm(template, productId, factoryOpts, allCos, onSave, parentDlg, defaultSortOrder = 0) {
     const isEdit = !!template
     const items = (template?.milestone_template_items ?? []).sort((a, b) => a.sort_order - b.sort_order)
-    let itemList = items.map(i => ({ id: i.id, question: i.question, sort_order: i.sort_order, photoCount: itemPhotoMap[i.id] ?? 0 }))
+    let itemPhotoMap = {}
+    let itemList = items.map(i => ({ id: i.id, question: i.question, sort_order: i.sort_order, photoCount: 0 }))
 
     // Fetch existing visible companies + users + template contacts + required docs
     let visibleIds = new Set()
@@ -161,14 +162,14 @@ window.render_products = async function(container) {
       }
     }
 
-    // Fetch photo counts per template item
-    let itemPhotoMap = {}
+    // Fetch photo counts per template item and patch itemList
     if (isEdit && items.length) {
       const { data: photoRows } = await db.from('milestone_template_item_photos')
         .select('item_id').in('item_id', items.map(i => i.id))
       for (const p of photoRows ?? []) {
         itemPhotoMap[p.item_id] = (itemPhotoMap[p.item_id] ?? 0) + 1
       }
+      itemList = itemList.map(i => ({ ...i, photoCount: itemPhotoMap[i.id] ?? 0 }))
     }
 
     function itemsHtml() {
