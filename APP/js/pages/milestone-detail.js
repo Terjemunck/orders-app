@@ -31,10 +31,27 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
     const { data: extraItems } = await db.from('milestone_extra_items')
       .select('*').eq('milestone_id', milestoneId).order('sort_order')
 
-    return { milestone: ms, items, responses: responses ?? [], docs: docs ?? [], visibleCos: visibleCos ?? [], contacts: contacts ?? [], requiredDocs: requiredDocs ?? [], extraItems: extraItems ?? [] }
+    let responsePhotos = []
+    if (responses?.length) {
+      const { data: photosData } = await db.from('checksheet_response_photos')
+        .select('*')
+        .in('response_id', responses.map(r => r.id))
+      responsePhotos = photosData ?? []
+    }
+
+    return { milestone: ms, items, responses: responses ?? [], docs: docs ?? [], visibleCos: visibleCos ?? [], contacts: contacts ?? [], requiredDocs: requiredDocs ?? [], extraItems: extraItems ?? [], responsePhotos }
   }
 
-  function renderPage({ milestone, items, responses, docs, visibleCos, contacts, requiredDocs, extraItems }) {
+  function sanitizeFilename(name) {
+    return name
+      .replace(/[–—]/g, '-')
+      .replace(/[^\w\s.\-_()]/g, '')
+      .replace(/\s+/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '')
+  }
+
+  function renderPage({ milestone, items, responses, docs, visibleCos, contacts, requiredDocs, extraItems, responsePhotos }) {
     if (!milestone) { container.innerHTML = '<div class="p-6 text-sm text-gray-500">Milestone not found.</div>'; return }
 
     const requiredDocIds = new Set(requiredDocs.filter(rd => rd.document_id).map(rd => rd.document_id))
@@ -126,6 +143,12 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
                 const resp = responses.find(r => r.item_id === item.id)
                 const checked = resp?.answer ?? false
                 const disabled = !canEdit || milestone.completed
+                const photoCount = resp ? responsePhotos.filter(p => p.response_id === resp.id).length : 0
+                const photoBtn = resp
+                  ? `<button class="cs-photo-btn shrink-0 flex items-center gap-1 px-1.5 py-1 rounded ${photoCount > 0 ? 'text-blue-600 hover:text-blue-800' : 'text-gray-300 hover:text-gray-500'}"
+                      data-resp-id="${resp.id}" data-label="${item.question.replace(/"/g, '&quot;')}"
+                      title="${photoCount > 0 ? photoCount + ' photo(s)' : 'Add photo'}">${icons.camera}${photoCount > 0 ? `<span class="text-xs font-medium">${photoCount}</span>` : ''}</button>`
+                  : ''
                 return `<div class="flex items-center gap-3 px-4 py-2.5 ${checked ? 'bg-green-50' : ''}">
                   <button type="button" class="toggle-item shrink-0 ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}"
                     data-item-id="${item.id}" data-resp-id="${resp?.id ?? ''}" data-checked="${checked}" ${disabled ? 'disabled' : ''}>
@@ -133,12 +156,19 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
                   </button>
                   <p class="text-sm flex-1">${item.question}</p>
                   ${resp?.answered_at ? `<span class="text-xs text-gray-300 shrink-0">${new Date(resp.answered_at).toLocaleDateString()}</span>` : ''}
+                  ${photoBtn}
                 </div>`
               }).join('')}
               ${extraItems.map(item => {
                 const resp = responses.find(r => r.extra_item_id === item.id)
                 const checked = resp?.answer ?? false
                 const disabled = !canEdit || milestone.completed
+                const photoCount = resp ? responsePhotos.filter(p => p.response_id === resp.id).length : 0
+                const photoBtn = resp
+                  ? `<button class="cs-photo-btn shrink-0 flex items-center gap-1 px-1.5 py-1 rounded ${photoCount > 0 ? 'text-blue-600 hover:text-blue-800' : 'text-gray-300 hover:text-gray-500'}"
+                      data-resp-id="${resp.id}" data-label="${item.question.replace(/"/g, '&quot;')}"
+                      title="${photoCount > 0 ? photoCount + ' photo(s)' : 'Add photo'}">${icons.camera}${photoCount > 0 ? `<span class="text-xs font-medium">${photoCount}</span>` : ''}</button>`
+                  : ''
                 return `<div class="flex items-center gap-3 px-4 py-2.5 ${checked ? 'bg-green-50' : ''}">
                   <button type="button" class="toggle-item shrink-0 ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}"
                     data-extra-item-id="${item.id}" data-resp-id="${resp?.id ?? ''}" data-checked="${checked}" ${disabled ? 'disabled' : ''}>
@@ -146,6 +176,7 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
                   </button>
                   <p class="text-sm flex-1">${item.question}</p>
                   <span class="text-xs text-gray-300 shrink-0 italic">custom</span>
+                  ${photoBtn}
                   ${isMgr && !milestone.completed ? `<button class="del-extra-btn shrink-0 p-1 text-gray-300 hover:text-red-500 rounded ml-1" data-extra-id="${item.id}">${icons.trash}</button>` : ''}
                 </div>`
               }).join('')}
@@ -398,6 +429,10 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
       })
     })
 
+    container.querySelectorAll('.cs-photo-btn').forEach(b => {
+      b.addEventListener('click', () => openPhotoModal(b.dataset.label, b.dataset.respId, canUpload))
+    })
+
     container.querySelector('#reopen-ms-btn')?.addEventListener('click', async () => {
       const btn = container.querySelector('#reopen-ms-btn')
       btn.disabled = true; btn.textContent = 'Reopening…'
@@ -462,15 +497,6 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
     })
 
     // ── Upload helpers ────────────────────────────────────────────────────────
-    function sanitizeFilename(name) {
-      return name
-        .replace(/[–—]/g, '-')            // em/en dash → hyphen
-        .replace(/[^\w\s.\-_()]/g, '')    // strip other special chars
-        .replace(/\s+/g, '_')             // spaces → underscore
-        .replace(/_+/g, '_')              // collapse multiple underscores
-        .replace(/^_|_$/g, '')            // trim leading/trailing underscores
-    }
-
     async function doUploadDoc(file) {
       const safeName = sanitizeFilename(file.name)
       const filePath = `milestones/${milestoneId}/${Date.now()}_${safeName}`
@@ -750,6 +776,84 @@ window.render_milestoneDetail = async function(container, orderId, milestoneId) 
       </div>` })
 
     document.querySelector('.close-date-history')?.addEventListener('click', () => closeModal('date-history-modal'))
+  }
+
+  async function openPhotoModal(label, respId, canUploadPhotos) {
+    const { data: photos } = await db.from('checksheet_response_photos')
+      .select('*').eq('response_id', respId).order('uploaded_at')
+
+    // Generate signed URLs
+    const signedPhotos = await Promise.all((photos ?? []).map(async p => {
+      const { data } = await db.storage.from('Documents').createSignedUrl(p.file_path, 3600)
+      return { ...p, signedUrl: data?.signedUrl }
+    }))
+
+    const thumbsHtml = signedPhotos.map(p => `
+      <div class="relative group">
+        <a href="${p.signedUrl}" target="_blank" class="block">
+          <img src="${p.signedUrl}" alt="${p.filename}"
+            class="w-full h-28 object-cover rounded-lg border border-gray-200 hover:border-blue-300 transition-colors" />
+        </a>
+        ${canUploadPhotos ? `<button class="del-photo-btn absolute top-1 right-1 bg-white/90 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+          data-photo-id="${p.id}" data-path="${p.file_path}">${icons.trash}</button>` : ''}
+        <p class="text-xs text-gray-400 truncate mt-1">${p.filename}</p>
+      </div>`).join('')
+
+    const dlg = showModal({ id: 'photo-modal', title: `Photos — ${label}`, size: 'lg', body: `
+      <div>
+        ${signedPhotos.length > 0
+          ? `<div class="grid grid-cols-3 gap-3 mb-4">${thumbsHtml}</div>`
+          : `<p class="text-sm text-gray-400 text-center py-6 mb-2">No photos yet.</p>`}
+        ${canUploadPhotos ? `
+          <label class="flex flex-col items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-gray-200 px-4 py-5 cursor-pointer hover:border-blue-300 hover:bg-blue-50/40 transition-colors">
+            <input type="file" class="hidden photo-upload-input" multiple accept="image/*" />
+            <span class="text-gray-300">${icons.upload}</span>
+            <span class="text-xs text-gray-400">Add photos — <span class="text-blue-600">click to browse</span></span>
+          </label>
+          <p id="photo-upload-error" class="hidden text-sm text-red-600 mt-2"></p>` : ''}
+        <div class="flex justify-end pt-3">
+          ${btn('Close', { variant: 'outline', cls: 'close-photo-modal' })}
+        </div>
+      </div>` })
+
+    dlg.querySelector('.close-photo-modal')?.addEventListener('click', () => closeModal('photo-modal'))
+
+    dlg.querySelector('.photo-upload-input')?.addEventListener('change', async function() {
+      const files = [...(this.files ?? [])]; if (!files.length) return
+      const errEl = dlg.querySelector('#photo-upload-error')
+      errEl?.classList.add('hidden')
+      this.disabled = true
+      for (const file of files) {
+        const safeName = sanitizeFilename(file.name)
+        const filePath = `checksheet-photos/${milestoneId}/${respId}/${Date.now()}_${safeName}`
+        const { error: uploadErr } = await db.storage.from('Documents').upload(filePath, file)
+        if (uploadErr) {
+          if (errEl) { errEl.textContent = uploadErr.message; errEl.classList.remove('hidden') }
+          this.disabled = false; return
+        }
+        const { error: insErr } = await db.from('checksheet_response_photos').insert({
+          response_id: respId, file_path: filePath, filename: file.name,
+          uploaded_by: auth.profile?.id ?? null,
+        })
+        if (insErr) {
+          if (errEl) { errEl.textContent = insErr.message; errEl.classList.remove('hidden') }
+          this.disabled = false; return
+        }
+      }
+      closeModal('photo-modal')
+      renderPage(await load())
+    })
+
+    dlg.querySelectorAll('.del-photo-btn').forEach(b => {
+      b.addEventListener('click', async () => {
+        if (!confirm('Delete this photo?')) return
+        b.disabled = true
+        await db.storage.from('Documents').remove([b.dataset.path])
+        await db.from('checksheet_response_photos').delete().eq('id', b.dataset.photoId)
+        closeModal('photo-modal')
+        renderPage(await load())
+      })
+    })
   }
 
   renderPage(await load())
