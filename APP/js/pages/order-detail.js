@@ -1,6 +1,6 @@
 window.render_orderDetail = async function(container, orderId) {
   container.innerHTML = '<div class="p-6 text-sm text-gray-400">Loading…</div>'
-  const canManage = auth.companyType === 'system_mgr' && auth.isManager
+  let canManage = auth.companyType === 'system_mgr' && auth.isManager
   const isProject = window.location.hash.startsWith('#/projects')
   const T        = isProject ? 'Project' : 'Order'
   const basePath = isProject ? '#/projects' : '#/orders'
@@ -50,6 +50,7 @@ window.render_orderDetail = async function(container, orderId) {
     lastRenderData = data
     const { order, milestones, templates } = data
     if (!order) { container.innerHTML = `<div class="p-6 text-sm text-gray-500">${T} not found.</div>`; return }
+    canManage = (auth.companyType === 'system_mgr' && auth.isManager) || (order.allow_user_milestones && auth.isManager)
 
     const viewMode = canManage ? (localStorage.getItem('od_view') ?? 'fancy') : 'fancy'
 

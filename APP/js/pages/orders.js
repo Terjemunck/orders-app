@@ -268,7 +268,15 @@ window.render_orders = async function(container) {
         ${formField('Expected Delivery', `<input type="date" name="expected_delivery" value="${order?.expected_delivery ?? ''}" class="${inputCls()}" />`)}
       </div>
       ${formField('Description', `<textarea name="description" rows="3" placeholder="Optional description or notes about this ${type}…" class="${inputCls()} resize-none">${order?.description ?? ''}</textarea>`)}
-      ${auth.companyType === 'system_mgr' ? `<label class="flex items-start gap-3 cursor-pointer select-none rounded-lg border border-orange-200 bg-orange-50 px-4 py-3">
+      ${auth.companyType === 'system_mgr' ? `
+      <label class="flex items-start gap-3 cursor-pointer select-none rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+        <input type="checkbox" name="allow_user_milestones" class="mt-0.5 rounded border-gray-300 shrink-0" ${order?.allow_user_milestones ? 'checked' : ''} />
+        <span>
+          <span class="text-sm font-medium text-blue-800">Managers can create milestones</span>
+          <span class="block text-xs text-blue-600 mt-0.5">Allow any company manager to add milestones to this ${type}.</span>
+        </span>
+      </label>
+      <label class="flex items-start gap-3 cursor-pointer select-none rounded-lg border border-orange-200 bg-orange-50 px-4 py-3">
         <input type="checkbox" name="suppress_notifications" class="mt-0.5 rounded border-gray-300 shrink-0" ${order?.suppress_notifications ? 'checked' : ''} />
         <span>
           <span class="text-sm font-medium text-orange-800">🔕 Suppress all email notifications</span>
@@ -342,6 +350,7 @@ window.render_orders = async function(container) {
           order_date: fd.get('order_date'),
           expected_delivery: fd.get('expected_delivery') || null,
           description: fd.get('description')?.trim() || null,
+          allow_user_milestones: auth.companyType === 'system_mgr' ? fd.get('allow_user_milestones') === 'on' : undefined,
           suppress_notifications: auth.companyType === 'system_mgr' ? fd.get('suppress_notifications') === 'on' : undefined,
           created_by: editingOrder ? undefined : (auth.profile?.id ?? null),
           type: editingOrder ? undefined : type,
